@@ -8,7 +8,7 @@ from typing import Iterator, Optional, Tuple
 
 from aim.ext.cleanup import AutoClean
 from aim.ext.exception_resistant import exception_resistant
-from aim.storage.locking import SoftFileLock, NoopLock, DualLock
+from aim.storage.locking import SoftFileLock, NoopLock
 from aim.storage.types import BLOB
 from aim.storage.container import Container, ContainerKey, ContainerValue, ContainerItemsIterator
 from aim.storage.prefixview import PrefixView
@@ -165,7 +165,8 @@ class RocksContainer(Container):
         for k, v in self.items():
             index[k] = v
 
-        self._progress_path.unlink()
+        if self._progress_path.exists():
+            self._progress_path.unlink()
         self._progress_path = None
 
     def close(self):
@@ -608,9 +609,3 @@ class RocksContainerItemsIterator(ContainerItemsIterator):
             return key, self.container._get_blob(key)
 
         return key, value
-
-
-class LockableRocksContainer(RocksContainer):
-    def get_lock_cls(self):
-        """Use both Unix file-locks and Soft file-locks to cover all the scenarios and avoid corruptions."""
-        return DualLock

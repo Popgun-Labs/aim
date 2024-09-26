@@ -17,6 +17,7 @@ const ENDPOINTS = {
     BASE: '/experiments',
     GET: '',
     CREATE: '',
+    DELETE: '',
     SEARCH: 'search',
     GET_ACTIVITY: 'activity',
     GET_NOTE: 'note',
@@ -41,6 +42,10 @@ const ENDPOINTS = {
     BASE: 'https://api.github.com/repos/aimhubio/aim/releases',
     GET: '',
     GET_BY_TAG_NAME: 'tags',
+  },
+  AUTH: {
+    BASE: 'auth',
+    REFRESH: 'refresh',
   },
 };
 

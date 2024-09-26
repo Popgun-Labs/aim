@@ -1,25 +1,17 @@
-import click
 import os
-import tqdm
 
 from multiprocessing.pool import ThreadPool
-from psutil import cpu_count
 
-from aim.cli.runs.utils import list_repo_runs, match_runs, make_zip_archive, upload_repo_runs, optimize_container
+import click
+import tqdm
+
+from aim.cli.runs.utils import make_zip_archive, match_runs, upload_repo_runs
 from aim.sdk.repo import Repo
-from aim.sdk.lock_manager import LockManager
-from aim.sdk.index_manager import RepoIndexManager
+from psutil import cpu_count
 
 
 @click.group()
-@click.option('--repo', required=False,
-              default=os.getcwd(),
-              type=click.Path(
-                  exists=True,
-                  file_okay=False,
-                  dir_okay=True,
-                  writable=True
-              ))
+@click.option('--repo', required=False, default=os.getcwd(), type=str)
 @click.pass_context
 def runs(ctx, repo):
     """Manage runs in aim repository."""
@@ -28,15 +20,18 @@ def runs(ctx, repo):
 
 
 @runs.command(name='ls')
+@click.option('--corrupted', is_flag=True, help='List corrupted runs only')
 @click.pass_context
-def list_runs(ctx):
+def list_runs(ctx, corrupted):
     """List Runs available in Repo."""
     repo_path = ctx.obj['repo']
-    if not Repo.exists(repo_path):
-        click.echo(f'\'{repo_path}\' is not a valid aim repo.')
-        exit(1)
+    if not Repo.is_remote_path(repo_path):
+        if not Repo.exists(repo_path):
+            click.echo(f"'{repo_path}' is not a valid aim repo.")
+            exit(1)
 
-    run_hashes = list_repo_runs(repo_path)
+    repo = Repo.from_path(repo_path)
+    run_hashes = repo.list_corrupted_runs() if corrupted else repo.list_all_runs()
 
     click.echo('\t'.join(run_hashes))
     click.echo(f'Total {len(run_hashes)} runs.')
@@ -45,40 +40,44 @@ def list_runs(ctx):
 @runs.command(name='rm')
 @click.argument('hashes', nargs=-1, type=str)
 @click.pass_context
+@click.option('--corrupted', is_flag=True, help='Remove all corrupted runs')
 @click.option('-y', '--yes', is_flag=True, help='Automatically confirm prompt')
-def remove_runs(ctx, hashes, yes):
+def remove_runs(ctx, hashes, corrupted, yes):
     """Remove Run data for given run hashes."""
-    if len(hashes) == 0:
-        click.echo('Please specify at least one Run to delete.')
+    if len(hashes) == 0 and corrupted is False:
+        click.echo('Please specify Run hashes or `--corrupted` flag to delete runs.')
         exit(1)
     repo_path = ctx.obj['repo']
     repo = Repo.from_path(repo_path)
 
-    matched_hashes = match_runs(repo_path, hashes)
+    if corrupted:
+        run_hashes = repo.list_corrupted_runs()
+    else:
+        run_hashes = match_runs(repo, hashes)
+    if len(run_hashes) == 0:
+        click.echo('No matching runs found.')
+        exit(0)
+
     if yes:
         confirmed = True
     else:
-        confirmed = click.confirm(f'This command will permanently delete {len(matched_hashes)} runs from aim repo '
-                                  f'located at \'{repo_path}\'. Do you want to proceed?')
+        confirmed = click.confirm(
+            f'This command will permanently delete {len(run_hashes)} runs from aim repo '
+            f"located at '{repo_path}'. Do you want to proceed?"
+        )
     if not confirmed:
         return
 
-    success, remaining_runs = repo.delete_runs(matched_hashes)
+    success, remaining_runs = repo.delete_runs(run_hashes)
     if success:
-        click.echo(f'Successfully deleted {len(matched_hashes)} runs.')
+        click.echo(f'Successfully deleted {len(run_hashes)} runs.')
     else:
         click.echo('Something went wrong while deleting runs. Remaining runs are:', err=True)
         click.secho('\t'.join(remaining_runs), fg='yellow')
 
 
 @runs.command(name='cp')
-@click.option('--destination', required=True,
-              type=click.Path(
-                  exists=True,
-                  file_okay=False,
-                  dir_okay=True,
-                  writable=True
-              ))
+@click.option('--destination', required=True, type=str)
 @click.argument('hashes', nargs=-1, type=str)
 @click.pass_context
 def copy_runs(ctx, destination, hashes):
@@ -90,7 +89,7 @@ def copy_runs(ctx, destination, hashes):
     source_repo = Repo.from_path(source)
     destination_repo = Repo.from_path(destination)
 
-    matched_hashes = match_runs(source, hashes)
+    matched_hashes = match_runs(source_repo, hashes)
     success, remaining_runs = source_repo.copy_runs(matched_hashes, destination_repo)
     if success:
         click.echo(f'Successfully copied {len(matched_hashes)} runs.')
@@ -100,13 +99,7 @@ def copy_runs(ctx, destination, hashes):
 
 
 @runs.command(name='mv')
-@click.option('--destination', required=True,
-              type=click.Path(
-                  exists=True,
-                  file_okay=False,
-                  dir_okay=True,
-                  writable=True
-              ))
+@click.option('--destination', required=True, type=str)
 @click.argument('hashes', nargs=-1, type=str)
 @click.pass_context
 def move_runs(ctx, destination, hashes):
@@ -118,7 +111,7 @@ def move_runs(ctx, destination, hashes):
     source_repo = Repo.from_path(source)
     destination_repo = Repo.from_path(destination)
 
-    matched_hashes = match_runs(source, hashes)
+    matched_hashes = match_runs(source_repo, hashes)
 
     success, remaining_runs = source_repo.move_runs(matched_hashes, destination_repo)
     if success:
@@ -135,7 +128,7 @@ def upload_runs(ctx, bucket):
     """Upload Repo backup to the given S3 bucket."""
     repo_path = ctx.obj['repo']
     if not Repo.exists(repo_path):
-        click.echo(f'\'{repo_path}\' is not a valid aim repo.')
+        click.echo(f"'{repo_path}' is not a valid aim repo.")
         exit(1)
 
     zip_buffer = make_zip_archive(repo_path)
@@ -161,8 +154,10 @@ def close_runs(ctx, hashes, yes):
         click.echo('Please specify at least one Run to close.')
         exit(1)
 
-    click.secho(f'This command will forcefully close {len(hashes)} Runs from Aim Repo \'{repo_path}\'. '
-                f'Please make sure Runs are not active. Data corruption may occur otherwise.')
+    click.secho(
+        f"This command will forcefully close {len(hashes)} Runs from Aim Repo '{repo_path}'. "
+        f'Please make sure Runs are not active. Data corruption may occur otherwise.'
+    )
     if yes:
         confirmed = True
     else:
@@ -170,23 +165,7 @@ def close_runs(ctx, hashes, yes):
     if not confirmed:
         return
 
-    lock_manager = LockManager(repo.path)
-    index_manager = RepoIndexManager.get_index_manager(repo)
-
-    def close_run(run_hash):
-        if lock_manager.release_locks(run_hash, force=True):
-            # Run rocksdb optimizations if container locks are removed
-            meta_db_path = os.path.join(repo.path, 'meta', 'chunks', run_hash)
-            seqs_db_path = os.path.join(repo.path, 'seqs', 'chunks', run_hash)
-            optimize_container(meta_db_path, extra_options={'compaction': True})
-            optimize_container(seqs_db_path, extra_options={})
-        if index_manager.run_needs_indexing(run_hash):
-            index_manager.index(run_hash)
-
     pool = ThreadPool(cpu_count(logical=False))
 
-    for _ in tqdm.tqdm(
-            pool.imap_unordered(close_run, hashes),
-            desc='Closing runs',
-            total=len(hashes)):
+    for _ in tqdm.tqdm(pool.imap_unordered(repo._close_run, hashes), desc='Closing runs', total=len(hashes)):
         pass

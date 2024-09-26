@@ -12,6 +12,7 @@ on:
       - 'aim/sdk/**'
       - 'aim/web/api/**'
       - 'aim/storage/**'
+      - 'aim/utils/**'
       - '.github/workflows/pull-request.yml'
       - 'tests/**'
       - 'performance_tests/**'
@@ -56,7 +57,10 @@ jobs:
 
       - name: code style checks
         run: |
-          flake8 aim
+          set -e
+          ruff check .
+          ruff format . --check
+
 
       - name: unit-tests
         run: |

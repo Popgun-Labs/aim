@@ -44,6 +44,7 @@
    using/remote_tracking.md
    using/training_monitoring.md
    using/logging.md
+   using/artifacts.md
    using/notifications.md
    using/callbacks.md
    using/k8s_deployment.md
@@ -86,7 +87,6 @@
    :name: community
    :caption: Community
 
-   community/telemetry.md
    generated/CHANGELOG.md
 
 .. raw:: html

@@ -1,16 +1,20 @@
-from aim import Run
-from aim.sdk.objects.image import convert_to_aim_image_list
+import logging
 
 import torch
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 
+from aim import Run
+from aim.sdk.objects.image import convert_to_aim_image_list
+from tqdm import tqdm
+
+
 # Initialize a new Run
 aim_run = Run()
 
-# Device configuration
-device = torch.device('cpu')
+# moving model to gpu if available
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # Hyper parameters
 num_epochs = 5
@@ -27,23 +31,14 @@ aim_run['hparams'] = {
 }
 
 # MNIST dataset
-train_dataset = torchvision.datasets.MNIST(root='./data/',
-                                           train=True,
-                                           transform=transforms.ToTensor(),
-                                           download=True)
+train_dataset = torchvision.datasets.MNIST(root='./data/', train=True, transform=transforms.ToTensor(), download=True)
 
-test_dataset = torchvision.datasets.MNIST(root='./data/',
-                                          train=False,
-                                          transform=transforms.ToTensor())
+test_dataset = torchvision.datasets.MNIST(root='./data/', train=False, transform=transforms.ToTensor())
 
 # Data loader
-train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                           batch_size=batch_size,
-                                           shuffle=True)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 
-test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                          batch_size=batch_size,
-                                          shuffle=False)
+test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
 
 # Convolutional neural network (two convolutional layers)
@@ -54,12 +49,14 @@ class ConvNet(nn.Module):
             nn.Conv2d(1, 16, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm2d(16),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2))
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
         self.layer2 = nn.Sequential(
             nn.Conv2d(16, 32, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2))
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
         self.fc = nn.Linear(7 * 7 * 32, num_classes)
 
     def forward(self, x):
@@ -81,7 +78,7 @@ tensor_to_pil = transforms.ToPILImage()
 # Train the model
 total_step = len(train_loader)
 for epoch in range(num_epochs):
-    for i, (images, labels) in enumerate(train_loader):
+    for i, (images, labels) in tqdm(enumerate(train_loader), total=len(train_loader)):
         images = images.to(device)
         labels = labels.to(device)
         aim_images = convert_to_aim_image_list(images, labels)
@@ -96,13 +93,14 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         if i % 30 == 0:
-            print('Epoch [{}/{}], Step [{}/{}], '
-                  'Loss: {:.4f}'.format(epoch + 1, num_epochs, i + 1,
-                                        total_step, loss.item()))
+            logging.info(
+                'Epoch [{}/{}], Step [{}/{}], ' 'Loss: {:.4f}'.format(
+                    epoch + 1, num_epochs, i + 1, total_step, loss.item()
+                )
+            )
 
             # aim - Track model loss function
-            aim_run.track(loss.item(), name='loss', epoch=epoch,
-                          context={'subset':'train'})
+            aim_run.track(loss.item(), name='loss', epoch=epoch, context={'subset': 'train'})
 
             correct = 0
             total = 0
@@ -118,17 +116,16 @@ for epoch in range(num_epochs):
 
             # TODO: Do actual validation
             if i % 300 == 0:
-                aim_run.track(loss.item(), name='loss', epoch=epoch, context={'subset': 'val'})
+                aim_run.track(loss, name='loss', epoch=epoch, context={'subset': 'val'})
                 aim_run.track(acc, name='accuracy', epoch=epoch, context={'subset': 'val'})
                 aim_run.track(aim_images, name='images', epoch=epoch, context={'subset': 'val'})
 
 
 # Test the model
-model.eval()
-with torch.no_grad():
+with torch.inference_mode():
     correct = 0
     total = 0
-    for images, labels in test_loader:
+    for images, labels in tqdm(test_loader, total=len(test_loader)):
         images = images.to(device)
         labels = labels.to(device)
         outputs = model(images)
@@ -136,4 +133,4 @@ with torch.no_grad():
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
 
-    print('Test Accuracy: {} %'.format(100 * correct / total))
+    logging.info('Test Accuracy: {} %'.format(100 * correct / total))

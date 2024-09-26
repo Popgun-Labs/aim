@@ -148,6 +148,7 @@ export const ANALYTICS_EVENT_KEYS = {
       hideAllColumns: '[RunsExplorer][Table] Hide all columns',
       showDiff: '[RunsExplorer][Table] Show columns diff',
       changeTableRowHeight: '[RunsExplorer][Table] Change rows height',
+      changeMetricsValueKey: '[RunsExplorer][Table] Change metrics value key',
       changeSorting: '[RunsExplorer][Table] Change sorting',
       metricVisibilityChange: '[RunsExplorer][Table] Change metric visibility',
       compareSelectedRuns: '[RunsExplorer][Table] Compare selected runs',
@@ -272,6 +273,7 @@ export const ANALYTICS_EVENT_KEYS = {
       },
       settings: {
         tabView: '[Experiment] [Settings] Tab view',
+        deleteExperiment: '[Experiment] [Settings] Delete experiment',
       },
     },
     table: {
